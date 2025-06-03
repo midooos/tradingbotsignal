@@ -4,9 +4,10 @@ import schedule
 import time
 import re
 
-# Telegram credentials
-BOT_TOKEN = "7214208491:AAFkaFAQDpD2eJ-NztiyGzQOu_gejlES3rc"
-CHAT_ID = "5695598169"
+import os
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+
 
 # Store sent signals to avoid duplicates
 sent_links = set()
