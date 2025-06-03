@@ -3,23 +3,35 @@ import requests
 import schedule
 import time
 import re
-
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# === Dummy server to keep Render web service alive ===
+def run_dummy_server():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running on Render.")
+    server = HTTPServer(("", 10000), Handler)  # Port 10000 required by Render
+    server.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
+
+# === Telegram Bot Credentials ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-
-# Store sent signals to avoid duplicates
+# === Storage to avoid duplicate signals ===
 sent_links = set()
 
-# Keywords that indicate actionable signals
+# === Keywords to detect real signals ===
 TRADING_KEYWORDS = ["buy", "sell", "شراء", "بيع"]
 
 def extract_tp_sl(description):
-    # Look for numbers after TP or SL (English or Arabic)
     tp_match = re.search(r"(TP|Take Profit|الهدف)[^\d]*?(\d{4,6})", description, re.IGNORECASE)
     sl_match = re.search(r"(SL|Stop Loss|الوقف)[^\d]*?(\d{4,6})", description, re.IGNORECASE)
-    
     tp = tp_match.group(2) if tp_match else None
     sl = sl_match.group(2) if sl_match else None
     return tp, sl
@@ -27,26 +39,23 @@ def extract_tp_sl(description):
 def send_signal(title, link, tp=None, sl=None):
     if link in sent_links:
         return
-
     message = f"📢 إشارة تداول جديدة\n🔸 {title}"
     if tp:
         message += f"\n🎯 TP: {tp}"
     if sl:
         message += f"\n🛑 SL: {sl}"
     message += f"\n🔗 {link}"
-
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     response = requests.post(url, data={"chat_id": CHAT_ID, "text": message})
-
     if response.status_code == 200:
         sent_links.add(link)
         print(f"✅ Sent: {title}")
     else:
-        print(f"❌ Failed to send: {response.text}")
+        print(f"❌ Failed: {response.text}")
 
 def is_trading_signal(title):
-    title_lower = title.lower()
-    return any(word in title_lower for word in TRADING_KEYWORDS)
+    title = title.lower()
+    return any(keyword in title for keyword in TRADING_KEYWORDS)
 
 def get_signals(url):
     with sync_playwright() as p:
@@ -54,33 +63,26 @@ def get_signals(url):
         page = browser.new_page()
         page.goto(url, timeout=60000)
         page.wait_for_timeout(5000)
-
-        signals = []
         cards = page.query_selector_all(".tv-widget-idea__title-row")
-
+        signals = []
         for card in cards[:5]:
             title = card.inner_text()
-            link_path = card.query_selector("a").get_attribute("href")
-            full_link = f"https://www.tradingview.com{link_path}"
-
+            href = card.query_selector("a").get_attribute("href")
+            full_link = f"https://www.tradingview.com{href}"
             if is_trading_signal(title):
-                # Visit the full idea page to get description
-                idea_page = browser.new_page()
-                idea_page.goto(full_link, timeout=60000)
-                idea_page.wait_for_timeout(3000)
-
-                description_elem = idea_page.query_selector(".tv-chart-view__description, .tv-widget-idea__description")
-                description = description_elem.inner_text() if description_elem else ""
+                detail_page = browser.new_page()
+                detail_page.goto(full_link, timeout=60000)
+                detail_page.wait_for_timeout(3000)
+                desc_elem = detail_page.query_selector(".tv-chart-view__description, .tv-widget-idea__description")
+                description = desc_elem.inner_text() if desc_elem else ""
                 tp, sl = extract_tp_sl(description)
-
                 signals.append((title, full_link, tp, sl))
-                idea_page.close()
-
+                detail_page.close()
         browser.close()
         return signals
 
 def job():
-    print("🔍 Checking for trading signals...")
+    print("🔍 Checking for new trading signals...")
     urls = [
         "https://www.tradingview.com/symbols/BTCUSD/ideas/",
         "https://www.tradingview.com/symbols/ETHUSD/ideas/",
@@ -88,13 +90,13 @@ def job():
     ]
     for url in urls:
         try:
-            ideas = get_signals(url)
-            for title, link, tp, sl in ideas:
+            signals = get_signals(url)
+            for title, link, tp, sl in signals:
                 send_signal(title, link, tp, sl)
         except Exception as e:
-            print(f"⚠️ Error at {url}: {e}")
+            print(f"⚠️ Error: {e}")
 
-# Run once immediately
+# Run once on startup
 job()
 
 # Schedule every 10 minutes
