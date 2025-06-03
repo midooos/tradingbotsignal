@@ -3,5 +3,5 @@ services:
     name: telegram-trading-bot
     env: python
     plan: free
-    buildCommand: "pip install -r requirements.txt && playwright install"
-    startCommand: "python trading_bot.py"
+    buildCommand: "pip install -r requirements.txt && python -m playwright install"
+    startCommand: "python tradingsignalbot.py"
