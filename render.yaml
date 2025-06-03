@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: telegram-trading-bot
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt && playwright install"
+    startCommand: "python trading_bot.py"
